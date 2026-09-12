@@ -631,6 +631,30 @@ REMOVE_FABRIC_CRYPTO() {
     rm -rf "$EXTRACTED_FIRM_DIR/system/system/priv-app/KmxService"
 }
 
+REMOVE_KNOXGUARD() {
+    # P0: thay thế dòng rm $FIRM_DIR/$TARGET_DEVICE... sai scope trong Knox_script.sh.
+    # Chỉ xóa đúng 1 path đã whitelist bên trong EXTRACTED_FIRM_DIR.
+    if [ "$#" -ne 1 ]; then
+        echo "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIR>"
+        return 1
+    fi
+
+    local EXTRACTED_FIRM_DIR="$1"
+    [[ -n "${EXTRACTED_FIRM_DIR:?}" ]] || return 1
+    local target="$EXTRACTED_FIRM_DIR/system/system/priv-app/KnoxGuard"
+    # Guard: path phải nằm trong FIRM dir, không symlink escape
+    case "$target" in
+        */FIRMWARE/*|*/TMP/*|*FIRM_DIR*) ;;
+        *) echo "${RED}Refusing KnoxGuard removal outside firmware tree: $target${RESET}"; return 1 ;;
+    esac
+    if [[ -e "$target" || -L "$target" ]]; then
+        rm -rf -- "$target"
+        echo "${GREEN}Deleted${RESET} $target"
+    else
+        echo "${YELLOW}[Omitted] KnoxGuard not found${RESET}"
+    fi
+}
+
 JDM_DEBLOAT() {
     if [ "$#" -ne 1 ]; then
         echo "Usage: ${FUNCNAME[0]} <EXTRACTED_FIRM_DIR>"
@@ -748,6 +772,7 @@ DEBLOAT() {
     KICK "$EXTRACTED_FIRM_DIR"
     REMOVE_ESIM_FILES "$EXTRACTED_FIRM_DIR"
 	REMOVE_FABRIC_CRYPTO "$EXTRACTED_FIRM_DIR"
+    REMOVE_KNOXGUARD "$EXTRACTED_FIRM_DIR"
     JDM_DEBLOAT "$EXTRACTED_FIRM_DIR"
     DEODEX "$EXTRACTED_FIRM_DIR"
     
@@ -1027,20 +1052,30 @@ GEN_FS_CONFIG() {
             echo "$PARTITION 0 0 0755" | sudo tee "$FS_CONFIG" > /dev/null
         fi
 
-        sudo find "$ROOT" -mindepth 1 -printf "$PARTITION/%P\n" | while read -r ENTRY; do
-            [[ -z "$ENTRY" ]] && continue
-            
-            if ! grep -qF "$ENTRY " "$FS_CONFIG"; then
+        # P1 perf: O(n log n) batch instead of grep-per-file O(n*m).
+        # Build sorted existing-entry set once, diff with find output via comm,
+        # then append missing entries in one batch (2 sudo calls total).
+        local TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
+        sudo find "$ROOT" -mindepth 1 -printf "$PARTITION/%P\n" | LC_ALL=C sort -u > "$TMP_ALL"
+        awk '{print $1}' "$FS_CONFIG" | LC_ALL=C sort -u > "$TMP_EXIST"
+        LC_ALL=C comm -23 "$TMP_ALL" "$TMP_EXIST" > "$TMP_MISS"
+        if [[ -s "$TMP_MISS" ]]; then
+            local miss_count
+            miss_count=$(wc -l < "$TMP_MISS")
+            echo "  ${GREEN}[+]${RESET} Adding $miss_count missing entries to $PARTITION fs_config"
+            # Classify dirs vs files without per-entry test in bash loop:
+            # join missing list with find type info in a single pass.
+            while read -r ENTRY; do
+                [[ -z "$ENTRY" ]] && continue
                 local REL_PATH="${ENTRY#$PARTITION/}"
                 if [[ -d "$ROOT/$REL_PATH" ]]; then
-                    echo "  ${GREEN}[+]${RESET} Adding DIR: $ENTRY"
-                    echo "$ENTRY 0 0 0755" | sudo tee -a "$FS_CONFIG" > /dev/null
+                    echo "$ENTRY 0 0 0755"
                 else
-                    echo "  ${GREEN}[+]${RESET} Adding FILE: $ENTRY"
-                    echo "$ENTRY 0 0 0644" | sudo tee -a "$FS_CONFIG" > /dev/null
+                    echo "$ENTRY 0 0 0644"
                 fi
-            fi
-        done
+            done < "$TMP_MISS" | sudo tee -a "$FS_CONFIG" > /dev/null
+        fi
+        rm -f "$TMP_ALL" "$TMP_EXIST" "$TMP_MISS"
     done
 }
 
@@ -1056,38 +1091,25 @@ GEN_FILE_CONTEXTS() {
         [[ ! -f "$FILE_CONTEXTS" ]] && touch "$FILE_CONTEXTS"
 
         echo "${YELLOW}--- Syncing contexts for: $PARTITION ---${RESET}"
-        
-        local TMP_EXISTING=$(mktemp)
-        sed 's/\\//g' "$FILE_CONTEXTS" | awk '{print $1}' > "$TMP_EXISTING"
 
-        sudo find "$ROOT" -mindepth 1 \( -type f -o -type d \) -printf "/$PARTITION/%P\n" | while read -r PATH_ENTRY; do
-            
-            if ! grep -qxFe "$PATH_ENTRY" "$TMP_EXISTING" 2>/dev/null; then
-                echo "  ${GREEN}[+]${RESET} Context for: $PATH_ENTRY"
-                
-                local CONTEXT="u:object_r:system_file:s0"
+        # P1 perf: single find + comm instead of grep-per-file.
+        local TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
+        sudo find "$ROOT" -mindepth 1 \( -type f -o -type d \) -printf "/$PARTITION/%P\n" | LC_ALL=C sort -u > "$TMP_ALL"
+        sed 's/\\//g' "$FILE_CONTEXTS" | awk '{print $1}' | LC_ALL=C sort -u > "$TMP_EXIST"
+        LC_ALL=C comm -23 "$TMP_ALL" "$TMP_EXIST" > "$TMP_MISS"
 
-                if [[ "$PARTITION" == "vendor" ]]; then
-                    CONTEXT="u:object_r:vendor_file:s0"
-                
-                elif [[ "$PARTITION" == "system" || "$PARTITION" == "product" ]]; then
-                    if [[ "$PATH_ENTRY" == *.so ]]; then
-                        CONTEXT="u:object_r:system_lib_file:s0"
-                    else
-                        CONTEXT="u:object_r:system_file:s0"
-                    fi
-                fi
-
-                local ESCAPED_PATH=$(echo "$PATH_ENTRY" | sed -e 's/[.+]/\\&/g')
-                
-                if ! echo "$ESCAPED_PATH $CONTEXT" >> "$FILE_CONTEXTS" 2>/dev/null; then
-                    echo "$ESCAPED_PATH $CONTEXT" | sudo tee -a "$FILE_CONTEXTS" > /dev/null
-                fi
-                
-                echo "$PATH_ENTRY" >> "$TMP_EXISTING"
-            fi
-        done
-        rm "$TMP_EXISTING"
+        if [[ -s "$TMP_MISS" ]]; then
+            local miss_count
+            miss_count=$(wc -l < "$TMP_MISS")
+            echo "  ${GREEN}[+]${RESET} Adding $miss_count contexts for $PARTITION"
+            local DEFAULT_CTX="u:object_r:system_file:s0"
+            [[ "$PARTITION" == "vendor" ]] && DEFAULT_CTX="u:object_r:vendor_file:s0"
+            awk -v def="$DEFAULT_CTX" '
+                /\.so$/ && def == "u:object_r:system_file:s0" { p=$1; gsub(/[.+]/, "\\\\&", p); print p" u:object_r:system_lib_file:s0"; next }
+                { p=$1; gsub(/[.+]/, "\\\\&", p); print p" "def }
+            ' "$TMP_MISS" | sudo tee -a "$FILE_CONTEXTS" > /dev/null
+        fi
+        rm -f "$TMP_ALL" "$TMP_EXIST" "$TMP_MISS"
     done
 }
 
@@ -1121,6 +1143,10 @@ BUILD_IMG() {
     GEN_FS_CONFIG "$EXTRACTED_FIRM_DIR"
 	GEN_FILE_CONTEXTS "$EXTRACTED_FIRM_DIR"
 
+    # Normalize vendor ownership once (was per-partition inside parallel jobs -> race)
+    sudo chown -R "$(whoami)":"$(whoami)" "${EXTRACTED_FIRM_DIR}/vendor/" 2>/dev/null || true
+    mkdir -p "$OUT_DIR"
+
     for PART in "$EXTRACTED_FIRM_DIR"/*; do
         [[ -d "$PART" ]] || continue    
         PARTITION="$(basename "$PART")"
@@ -1139,12 +1165,17 @@ BUILD_IMG() {
 
             sudo sort -u "$FILE_CONTEXTS" -o "$FILE_CONTEXTS"
             sudo sort -u "$FS_CONFIG" -o "$FS_CONFIG"
-            sudo chown -R $(whoami):$(whoami) "${EXTRACTED_FIRM_DIR}"/vendor/
 
             if [[ "$FILE_SYSTEM" == "erofs" ]]; then
                 echo "${YELLOW}Building EROFS image: $OUT_IMG${RESET}"
-                sudo $(pwd)/bin/erofs-utils/mkfs.erofs --mount-point="$MOUNT_POINT" --fs-config-file="$FS_CONFIG" --file-contexts="$FILE_CONTEXTS" -z lz4hc -b 4096 -T 1640995200 "$OUT_IMG" "$SRC_DIR" >/dev/null 2>&1
-                sudo chown -R $(whoami):$(whoami) "$OUT_IMG"
+                # P1: keep mkfs log in LOG_FILE instead of /dev/null; fail fast per-partition
+                local MKFS_LOG="${LOG_FILE:-/tmp/mkfs_${PARTITION}.log}"
+                if sudo "$(pwd)/bin/erofs-utils/mkfs.erofs" --mount-point="$MOUNT_POINT" --fs-config-file="$FS_CONFIG" --file-contexts="$FILE_CONTEXTS" -z lz4hc -b 4096 -T 1640995200 "$OUT_IMG" "$SRC_DIR" >>"$MKFS_LOG" 2>&1; then
+                    sudo chown -R "$(whoami)":"$(whoami)" "$OUT_IMG"
+                else
+                    echo "${RED}mkfs.erofs failed for $PARTITION, see $MKFS_LOG${RESET}"
+                    exit 1
+                fi
             else
                 echo "${RED}Unknown filesystem: $FILE_SYSTEM, skipping $PARTITION${RESET}"
             fi

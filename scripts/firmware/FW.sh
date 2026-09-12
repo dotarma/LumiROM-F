@@ -7,24 +7,22 @@ if [ -f "scripts/utils/logging.sh" ]; then
     source scripts/utils/logging.sh
 fi
 
+# shellcheck disable=SC1091
+source scripts/utils/devices.sh
+
 GET_BASE_DEVICE() {
     if [ "$#" -ne 1 ]; then
         echo "Usage: ${FUNCNAME[0]} <STOCK_DEVICE>"
         return 1
     fi
 
-    case "$1" in
-        SM-A325F|SM-A325M|SM-M325F)
-            echo "SM-A346B"
-            ;;
-        SM-A225F|SM-A225M|SM-E225F|SM-M225F|SM-A226B)
-            echo "SM-A245F"
-            ;;
-        *)
-            echo "${RED}Error:${RESET} No base device found for $1." >&2
-            return 1
-            ;;
-    esac
+    local base
+    if base=$(GET_BASE_DEVICE_CENTRAL "$1"); then
+        echo "$base"
+    else
+        echo "${RED}Error:${RESET} No base device found for $1." >&2
+        return 1
+    fi
 }
 
 CHECK_FIRMWARE_IMAGES() {
@@ -71,7 +69,7 @@ CLEAR_FIRMWARE_CACHE() {
 
     local FIRM_DIR="$1"
     echo "${YELLOW}Clearing firmware cache...${RESET}"
-    rm -rf "$FIRM_DIR"
+    rm -rf -- "${FIRM_DIR:?}/"
     mkdir -p "$FIRM_DIR"
     echo "${GREEN}Cache cleared.${RESET}"
 }
@@ -107,8 +105,9 @@ DOWNLOAD_FIRMWARE() {
     local CSC="$2"
     local IMEI="$3"
     local DOWN_DIR="${4}/$MODEL"
+    local VERSION="${5:-${VERSION:-}}"
 
-    rm -rf "$DOWN_DIR"
+    rm -rf -- "${DOWN_DIR:?}"
     mkdir -p "$DOWN_DIR"
 
         echo "${BLUE}======================================${RESET}"
@@ -140,7 +139,7 @@ DOWNLOAD_FIRMWARE() {
         python3 -m samloader -m "$MODEL" -r "$CSC" -i "$IMEI" download -O "$DOWN_DIR"
         if [ $? -ne 0 ]; then
             echo "⛔️ Download failed. Check IMEI/MODEL/CSC."
-            exit 1
+            return 1
         fi
 
         find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
@@ -150,7 +149,7 @@ DOWNLOAD_FIRMWARE() {
         echo "Firmware Size: ${file_size} MB"
 
         mv "${DOWN_DIR}"/${MODEL}_*_fac.zip "IMGs/${MODEL}.zip"
-        rm -rf "${DOWN_DIR}/${MODEL}"
+        rm -rf -- "${DOWN_DIR:?}/${MODEL:?}"
 }
 
 DOWNLOAD_FIRMWARE_LUMI() {
@@ -160,7 +159,7 @@ DOWNLOAD_FIRMWARE_LUMI() {
     fi
 
     local DOWN_DIR="${1}"
-    rm -rf "$DOWN_DIR"
+    rm -rf -- "${DOWN_DIR:?}/"
     mkdir -p "$DOWN_DIR"
 
     if [[ "$STOCK_DEVICE" == "SM-A325F" || "$STOCK_DEVICE" == "SM-A325M" || "$STOCK_DEVICE" == "SM-M325F" ]]; then
@@ -185,7 +184,7 @@ DOWNLOAD_OTA() {
     fi
 
     local DOWN_DIR="${1}"
-    rm -rf "$DOWN_DIR"
+    rm -rf -- "${DOWN_DIR:?}/"
     mkdir -p "$DOWN_DIR"
 
     echo "${YELLOW}Downloading OTA${RESET}"
@@ -209,21 +208,24 @@ MERGE_OTA() {
     local OTA_DIR="$2"
     local IMG_DIR="$3"
 
+    [[ -n "${TARGET_DEVICE:?must be set for MERGE_OTA}" ]] || return 1
+    [[ -f "${FW_DIR}/${TARGET_DEVICE}/${TARGET_DEVICE}.zip" ]] || { echo "Missing ${FW_DIR}/${TARGET_DEVICE}/${TARGET_DEVICE}.zip"; return 1; }
+    [[ -f "${OTA_DIR}/OTA_${TARGET_DEVICE}.zip" ]] || { echo "Missing ${OTA_DIR}/OTA_${TARGET_DEVICE}.zip"; return 1; }
     mv "${FW_DIR}/${TARGET_DEVICE}/${TARGET_DEVICE}.zip" ./bin/MergeOTA/
     mv "${OTA_DIR}/OTA_${TARGET_DEVICE}.zip" ./bin/MergeOTA/
     
     echo "${YELLOW}Running MergeAll.sh...${RESET}"
     ./bin/MergeOTA/MergeAll.sh "./bin/MergeOTA/${TARGET_DEVICE}.zip" "./bin/MergeOTA/OTA_${TARGET_DEVICE}.zip" 2>&1 | tee -a "$LOG_FILE"
 
-    # Removes the downloaded firmware and update files
-    rm -rf "./bin/MergeOTA/${TARGET_DEVICE}.zip"
-    rm -rf "./bin/MergeOTA/OTA_${TARGET_DEVICE}.zip"
+    # Removes the downloaded firmware and update files (explicit paths only)
+    rm -f -- "./bin/MergeOTA/${TARGET_DEVICE}.zip"
+    rm -f -- "./bin/MergeOTA/OTA_${TARGET_DEVICE}.zip"
 
-    # Removes the not useful partitions
-    rm -rf ./out/odm_dlkm.img
-    rm -rf ./out/system_dlkm.img
-    rm -rf ./out/vendor.img
-    rm -rf ./out/vendor_dlkm.img
+    # Removes the not useful partitions (explicit paths only)
+    rm -f -- ./out/odm_dlkm.img
+    rm -f -- ./out/system_dlkm.img
+    rm -f -- ./out/vendor.img
+    rm -f -- ./out/vendor_dlkm.img
 
     # Moves the files to the firmware directory and cleans up
     rmdir "${FW_DIR}/${TARGET_DEVICE}"
@@ -259,7 +261,7 @@ EXTRACT_FIRMWARE() {
 
 	if [ ! -d "$FIRM_DIR" ]; then
         echo "- Directory not found: $FIRM_DIR"
-        exit
+        return 1
     fi
 
     # ---- ZIP ----
@@ -308,7 +310,11 @@ EXTRACT_FIRMWARE() {
     # LZ4 Extraction
     echo "Extracting super.img.lz4"
     find "$FIRM_DIR" -type f -name "*.lz4" ! -name "super.img.lz4" -delete
-    lz4 -d "$FIRM_DIR/super.img.lz4" "$FIRM_DIR/super.img" 
+    if [[ ! -f "$FIRM_DIR/super.img.lz4" ]]; then
+        echo "- super.img.lz4 not found, skipping lz4 step."
+        return 1
+    fi
+    lz4 -d "$FIRM_DIR/super.img.lz4" "$FIRM_DIR/super.img" || return 1
     echo "Firmware Extraction complete."
 }
 

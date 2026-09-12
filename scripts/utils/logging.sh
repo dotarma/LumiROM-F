@@ -23,11 +23,15 @@ log_message() {
     echo "[$timestamp] $message" | tee -a "$LOG_FILE"
 }
 
-# log_error: Print error message to console, log file, and error log
+# log_error: Print error message to console, log file, and error log.
+# Also emits GitHub Actions annotation when running in CI (P2 observability).
 log_error() {
     local message="$1"
     local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[$timestamp] ERROR: $message" | tee -a "$LOG_FILE" "$ERROR_LOG"
+    echo "[$timestamp] ERROR: $message" | tee -a "$LOG_FILE" >> "$ERROR_LOG"
+    if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+        echo "::error::$message" >&2
+    fi
 }
 
 # log_section: Print section header with dividers
@@ -38,7 +42,7 @@ log_section() {
     log_message "${BLUE}=========================================${RESET}"
 }
 
-# initialize_logs: Create header for the log file
+# initialize_logs: Create header for the log file (single write, P1 fix duplicate)
 initialize_logs() {
     local stock_device="$1"
     local target_device="$2"
@@ -50,25 +54,10 @@ initialize_logs() {
     local use_ui_8_tethering_apex="$8"
     local output_filesystem="$9"
     local lumirom_maintainer="$10"
-    
-    {
-        echo "${BLUE}======================================${RESET}"
-        echo "${HI_BLUE}LumiROM Build Log${RESET}"
-        echo "${BLUE}======================================${RESET}"
-        echo "Start Time: $(date)"
-        echo "Maintainer: $lumirom_maintainer"
-        echo "Stock Device: $stock_device"
-        echo "Target Device: $target_device"
-        echo "Target CSC: $target_csc"
-        echo "Target IMEI: $target_imei"
-        echo "Version: $lumirom_version"
-        echo "Use Mods: $use_mods"
-        echo "Use Galaxy AI: $use_galaxy_ai"
-        echo "Use UI 8 Tethering Apex: $use_ui_8_tethering_apex"
-        echo "Output Filesystem: $output_filesystem"
-        echo "${BLUE}======================================${RESET}"
-        echo
-    } > "$LOG_FILE"
+
+    mkdir -p "$LOGS_DIR"
+    : > "$LOG_FILE"
+    : > "$ERROR_LOG"
     
     {
         echo "${BLUE}======================================${RESET}"

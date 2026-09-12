@@ -1,0 +1,4 @@
+# ShellCheck config (P2)
+disable=SC1090,SC1091
+severity=warning
+shell=bash

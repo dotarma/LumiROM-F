@@ -11,8 +11,8 @@ REPLACE_SMALI_METHOD() {
     echo "  Method: $METHOD_NAME"
 
     if ! grep -Fq "$METHOD_NAME" "$FILE"; then
-        echo "${RED}- Method not found${RESET}"
-        return 0
+        echo "${RED}- Method not found: $METHOD_NAME in $FILE${RESET}"
+        return 1
     fi
 
     # Extract method key
@@ -49,7 +49,7 @@ PATCH_FLAG_SECURE() {
 
     return v0
     '
-    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
+    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1" || return 1
   
 	local FILE_2="${1}/smali_classes2/com/android/server/wm/WindowManagerService.smali"
     local METHOD_NAME_2=".method public final notifyScreenshotListeners(I)Ljava/util/List;"
@@ -91,7 +91,7 @@ PATCH_FLAG_SECURE() {
 
     throw p0
     '
-    REPLACE_SMALI_METHOD "$FILE_2" "$METHOD_NAME_2" "$REPLACE_BODY_2"
+    REPLACE_SMALI_METHOD "$FILE_2" "$METHOD_NAME_2" "$REPLACE_BODY_2" || return 1
 }
 
 
@@ -117,9 +117,9 @@ PATCH_SECURE_FOLDER() {
     return p0
     '
 
-    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1"
-    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_2" "$REPLACE_BODY_1"
-	REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1"
+    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_1" "$REPLACE_BODY_1" || return 1
+    REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_2" "$REPLACE_BODY_1" || return 1
+	REPLACE_SMALI_METHOD "$FILE_1" "$METHOD_NAME_3" "$REPLACE_BODY_1" || return 1
 
     local FILE_2="${1}/smali/com/android/server/StorageManagerService.smali"
     local METHOD_NAME_4=".method public static isRootedDevice()Z"
@@ -130,7 +130,7 @@ PATCH_SECURE_FOLDER() {
  
     return v0
     '
-    REPLACE_SMALI_METHOD "$FILE_2" "$METHOD_NAME_4" "$REPLACE_BODY_2"
+    REPLACE_SMALI_METHOD "$FILE_2" "$METHOD_NAME_4" "$REPLACE_BODY_2" || return 1
 }
 
 
@@ -152,7 +152,7 @@ PATCH_PRIVATE_SHARE() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY" || return 1
 }
 
 
@@ -174,7 +174,7 @@ DISABLE_SIGNATURE_VERIFICATION() {
  
     return v0
     '
-	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY"
+	REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME" "$REPLACE_BODY" || return 1
 }
 
 
@@ -206,8 +206,10 @@ PATCH_KNOX_GUARD() {
 
     throw p0
     '
-    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME_1" "$REPLACE_BODY_1"
-	rm -rf "$FIRM_DIR/$TARGET_DEVICE/system/system/priv-app/KnoxGuard"
+    REPLACE_SMALI_METHOD "$FILE" "$METHOD_NAME_1" "$REPLACE_BODY_1" || return 1
+    # NOTE: KnoxGuard APK removal lives in DEBLOAT (LumiROM.sh) where
+    # EXTRACTED_FIRM_DIR is in scope. Do NOT rm with $FIRM_DIR/$TARGET_DEVICE
+    # here ($FIRM_DIR is undefined in this function scope).
 }
 
 PATCH_SSRM() {

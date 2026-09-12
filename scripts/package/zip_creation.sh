@@ -1,6 +1,8 @@
 #!/bin/bash
 
 source scripts/utils/bash_colors.sh
+# shellcheck disable=SC1091
+source scripts/utils/devices.sh
 
 UPDATE_ZIP_SCRIPT() {
     
@@ -14,25 +16,8 @@ UPDATE_ZIP_SCRIPT() {
         local cut_version="${oneui_prop_ver:0:3}"
         ONEUI_VERSION="${cut_version/0/.}"
 
-        if [[ "$DEVICE" == "SM-A325F" || "$DEVICE" == "SM-A325M" ]]; then
-            DEVICE_CODENAME="a32"
-            DISPLAY_NAME="Galaxy A32 4G"
-        elif [[ "$DEVICE" == "SM-A225F" ]]; then
-            DEVICE_CODENAME="a22"
-            DISPLAY_NAME="Galaxy A22 4G"
-        elif [[ "$DEVICE" == "SM-A226B" ]]; then
-            DEVICE_CODENAME="a22x"
-            DISPLAY_NAME="Galaxy A22 5G"
-        elif [[ "$DEVICE" == "SM-M325F" ]]; then
-            DEVICE_CODENAME="m32"
-            DISPLAY_NAME="Galaxy M32 4G"
-        elif [[ "$DEVICE" == "SM-E225F" ]]; then
-            DEVICE_CODENAME="f22"
-            DISPLAY_NAME="Galaxy F22 4G"
-        else
-            DEVICE_CODENAME="unknown"
-            DISPLAY_NAME="Unknown Device"
-        fi
+        DEVICE_CODENAME=$(DEVICE_CODENAME "$DEVICE")
+        DISPLAY_NAME=$(DEVICE_DISPLAY_NAME "$DEVICE")
 
         if [ -z "$FINGERPRINT" ]; then
             echo "${YELLOW}Warning: Fingerprint not found, using generic value.${RESET}"
@@ -71,21 +56,7 @@ FLASHABLE_ZIP_CREATION() {
             echo "FOLDER_NAME=$FOLDER_NAME" >> "$GITHUB_ENV"
         fi
 
-        if [[ "$DEVICE" == "SM-A325F" ]]; then
-            DEVICE_CODENAME="a32"
-        elif [[ "$DEVICE" == "SM-A325M" ]]; then
-            DEVICE_CODENAME="a32m"
-        elif [[ "$DEVICE" == "SM-A225F" ]]; then
-            DEVICE_CODENAME="a22"
-        elif [[ "$DEVICE" == "SM-A226B" ]]; then
-            DEVICE_CODENAME="a22x"
-        elif [[ "$DEVICE" == "SM-M325F" ]]; then
-            DEVICE_CODENAME="m32"
-        elif [[ "$DEVICE" == "SM-E225F" ]]; then
-            DEVICE_CODENAME="f22"
-        else
-            DEVICE_CODENAME="unknown"
-        fi
+        DEVICE_CODENAME=$(DEVICE_CODENAME "$DEVICE")
 
         echo "Generating build_info.txt..."
         {
@@ -94,6 +65,10 @@ FLASHABLE_ZIP_CREATION() {
             echo "timestamp=$TIMESTAMP"
             echo "status=$BUILD_STATUS"
         } > "$MAKEROM_DIR/build_info.txt"
+        {
+            printf '{\n  "device": "%s",\n  "device_model": "%s",\n  "version": "%s",\n  "build_date": "%s",\n  "timestamp": %s,\n  "status": "%s"\n}\n' \
+                "$DEVICE_CODENAME" "$DEVICE" "$LUMIROM_VERSION" "$BUILD_DATE" "$TIMESTAMP" "$BUILD_STATUS"
+        } > "$MAKEROM_DIR/build_info.json"
 
         SPECIFIC_BOOT="$(pwd)/LumiROM/Devices/$DEVICE/boot.img"
 
@@ -120,7 +95,7 @@ FLASHABLE_ZIP_CREATION() {
         7z a -mx=0 -mmt=4 "$ZIP_FILE" ./*.new.dat.br ./*.patch.dat 2>/dev/null || true
         
         echo "${YELLOW}Adding scripts and compressible data (Compress)...${RESET}"
-        7z a -mx=6 -mmt=4 "$ZIP_FILE" ./boot.img ./META-INF ./build_info.txt ./dynamic_partitions_op_list ./*.transfer.list 2>/dev/null || true
+        7z a -mx=6 -mmt=4 "$ZIP_FILE" ./boot.img ./META-INF ./build_info.txt ./build_info.json ./dynamic_partitions_op_list ./*.transfer.list 2>/dev/null || true
         
 
         mkdir -p "../ROM/${FOLDER_NAME}"
@@ -178,21 +153,7 @@ IMG_ZIP_CREATION() {
         echo "FOLDER_NAME=$FOLDER_NAME" >> "$GITHUB_ENV"
     fi
 
-    if [[ "$DEVICE" == "SM-A325F" ]]; then
-        DEVICE_CODENAME="a32"
-    elif [[ "$DEVICE" == "SM-A325M" ]]; then
-        DEVICE_CODENAME="a32m"
-    elif [[ "$DEVICE" == "SM-A225F" ]]; then
-        DEVICE_CODENAME="a22"
-    elif [[ "$DEVICE" == "SM-A226B" ]]; then
-        DEVICE_CODENAME="a22x"
-    elif [[ "$DEVICE" == "SM-M325F" ]]; then
-        DEVICE_CODENAME="m32"
-    elif [[ "$DEVICE" == "SM-E225F" ]]; then
-        DEVICE_CODENAME="f22"
-    else
-        DEVICE_CODENAME="unknown"
-    fi
+    DEVICE_CODENAME=$(DEVICE_CODENAME "$DEVICE")
 
     local ZIP_FILE="LumiROM_${LUMIROM_VERSION}-${BUILD_DATE}_${BUILD_STATUS}_${DEVICE_CODENAME}_IMG.zip"
 

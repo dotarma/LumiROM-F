@@ -86,7 +86,10 @@ VALIDATION
 
 # --- System Environment Variables ---
 export OUTPUT_FILESYSTEM="erofs"
-export LUMIROM_VERSION="8.6.4"
+# Single source of truth for version (P1: chống drift giữa local + 2 workflows)
+# shellcheck disable=SC1091
+[ -f "$PWD/version.env" ] && source "$PWD/version.env"
+export LUMIROM_VERSION="${LUMIROM_VERSION:-8.6.4}"
 export LUMIROM_CODE="${LUMIROM_VERSION//./0}"
 export OUT_DIR="$PWD/OUT"
 export WORK_DIR="$PWD/TMP/LumiWORK"
@@ -188,23 +191,25 @@ APPENDING_DISPLAY_ID "$FIRM_DIR" 2>&1 | tee -a "$LOG_FILE"
 INSTALL_FRAMEWORK "FIRMWARE/system/system/framework/framework-res.apk" 2>&1 | tee -a "$LOG_FILE"
 
 log_section "Patching Knox and Framework"
-DECOMPILE "$APKTOOL" "FIRMWARE/system/system/framework/ssrm.jar" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" &
-DECOMPILE "$APKTOOL" "FIRMWARE/system/system/framework/services.jar" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" &
-wait
+DECOMPILE "$APKTOOL" "FIRMWARE/system/system/framework/ssrm.jar" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" & p_ssrm=$!
+DECOMPILE "$APKTOOL" "FIRMWARE/system/system/framework/services.jar" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" & p_svc=$!
+wait "$p_ssrm" || { log_error "ssrm.jar decompile failed"; exit 1; }
+wait "$p_svc" || { log_error "services.jar decompile failed"; exit 1; }
 
 log_section "Applying Knox and Framework patches"
 source scripts/features/Knox_script.sh
-PATCH_SSRM "$WORK_DIR/ssrm" 2>&1 | tee -a "$LOG_FILE"
-PATCH_KNOX_GUARD "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE"
-PATCH_FLAG_SECURE "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE"
-PATCH_SECURE_FOLDER "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE"
-PATCH_PRIVATE_SHARE "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE"
-DISABLE_SIGNATURE_VERIFICATION "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE"
+PATCH_SSRM "$WORK_DIR/ssrm" 2>&1 | tee -a "$LOG_FILE" || { log_error "PATCH_SSRM failed"; exit 1; }
+PATCH_KNOX_GUARD "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE" || { log_error "PATCH_KNOX_GUARD failed"; exit 1; }
+PATCH_FLAG_SECURE "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE" || { log_error "PATCH_FLAG_SECURE failed"; exit 1; }
+PATCH_SECURE_FOLDER "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE" || { log_error "PATCH_SECURE_FOLDER failed"; exit 1; }
+PATCH_PRIVATE_SHARE "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE" || { log_error "PATCH_PRIVATE_SHARE failed"; exit 1; }
+DISABLE_SIGNATURE_VERIFICATION "$WORK_DIR/services" 2>&1 | tee -a "$LOG_FILE" || { log_error "DISABLE_SIGNATURE_VERIFICATION failed"; exit 1; }
 
 log_section "Recompiling Knox and Framework"
-RECOMPILE "$APKTOOL" "$WORK_DIR/ssrm" "FIRMWARE/system/system/framework" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" &
-RECOMPILE "$APKTOOL" "$WORK_DIR/services" "FIRMWARE/system/system/framework" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" &
-wait
+RECOMPILE "$APKTOOL" "$WORK_DIR/ssrm" "FIRMWARE/system/system/framework" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" & p_r1=$!
+RECOMPILE "$APKTOOL" "$WORK_DIR/services" "FIRMWARE/system/system/framework" "$WORK_DIR" 2>&1 | tee -a "$LOG_FILE" & p_r2=$!
+wait "$p_r1" || { log_error "ssrm recompile failed"; exit 1; }
+wait "$p_r2" || { log_error "services recompile failed"; exit 1; }
 cp -fv "$WORK_DIR"/*.jar "FIRMWARE/system/system/framework/" 2>&1 | tee -a "$LOG_FILE"
 
 log_section "Building ROM"
@@ -225,7 +230,14 @@ else
 fi
 
 log_message "Cleaning up temporary directories..."
-rm -rf ./OUT/ ./TMP/ ./WORK/ ./FIRMWARE/ 2>&1 | tee -a "$LOG_FILE"
+# P0: never rm with bare * or unguarded vars. Abort if not repo root.
+if [[ ! -f "$PWD/version.env" || ! -d "$PWD/scripts" ]]; then
+    log_error "Refusing cleanup: not LumiROM repo root ($PWD)"
+    exit 1
+fi
+for _d in OUT TMP WORK FIRMWARE; do
+    rm -rf -- "$PWD/${_d:?}/" 2>&1 | tee -a "$LOG_FILE"
+done
 
 log_message "✓ LumiROM $LUMIROM_VERSION for $STOCK_DEVICE is ready!"
 log_message "✓ You can find it in the ROM folder"

@@ -63,12 +63,15 @@ UBUNTU_PACKAGES() {
 }
 
 PYTHON_PACKAGES() {
+    # Pinned requirements (P1) so upload_hf.py modern API never breaks silently.
+    if [[ -f "$(dirname "${BASH_SOURCE[0]}")/../../requirements.txt" ]]; then
+        echo "Installing from requirements.txt..."
+        python3 -m pip install -r "$(dirname "${BASH_SOURCE[0]}")/../../requirements.txt" --break-system-packages
+    fi
     PIP_PACKAGES=(
         liblp
         tgcrypto
         pyrogram
-        huggingface_hub
-        hf_xet
     )
 
     SAMLOADER_URL="git+https://github.com/ananjaser1211/samloader.git"
@@ -94,8 +97,16 @@ PYTHON_PACKAGES() {
     echo -e "\nPython environment verified successfully!"
 }
 
-# Cleanup.
-sudo apt clean
-rm -rf ~/.cache/*
-sudo apt autoclean
-sudo apt autoremove -y
+CLEANUP_APT() {
+    sudo apt clean
+    sudo apt autoclean
+    sudo apt autoremove -y
+}
+
+# Only run when executed directly, NOT when sourced (P1: tránh side-effect
+# xóa ~/.cache/* mỗi lần source file này trong CI).
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    UBUNTU_PACKAGES
+    PYTHON_PACKAGES
+    CLEANUP_APT
+fi

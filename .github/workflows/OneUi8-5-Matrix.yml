@@ -73,7 +73,9 @@ jobs:
     - name: Set build environment
       shell: bash
       run: |
-        VERSION="8.6.4"
+        # P1: single source of truth — version.env, fallback 8.6.4
+        VERSION="$(grep -E '^LUMIROM_VERSION=' version.env 2>/dev/null | cut -d= -f2 || echo 8.6.4)"
+        VERSION="${VERSION:-8.6.4}"
 
         echo "STOCK_DEVICE=${{ matrix.device }}" >> $GITHUB_ENV
         echo "USE_MODS=${{ github.event.inputs.USE_MODS }}" >> $GITHUB_ENV
@@ -213,32 +215,37 @@ jobs:
       shell: bash
       run: |
         source scripts/features/LumiROM.sh
+        source scripts/utils/logging.sh
         DECOMPILE "$APKTOOL" \
-          "FIRMWARE/system/system/framework/ssrm.jar" "$WORK_DIR" &
+          "FIRMWARE/system/system/framework/ssrm.jar" "$WORK_DIR" & p1=$!
         DECOMPILE "$APKTOOL" \
-          "FIRMWARE/system/system/framework/services.jar" "$WORK_DIR" &
-        wait
+          "FIRMWARE/system/system/framework/services.jar" "$WORK_DIR" & p2=$!
+        wait "$p1" || { log_error "ssrm decompile failed"; exit 1; }
+        wait "$p2" || { log_error "services decompile failed"; exit 1; }
 
     - name: Patch Knox
       shell: bash
       run: |
         source scripts/features/Knox_script.sh
-        PATCH_SSRM "$WORK_DIR/ssrm"
-        PATCH_KNOX_GUARD "$WORK_DIR/services"
-        PATCH_FLAG_SECURE "$WORK_DIR/services"
-        PATCH_SECURE_FOLDER "$WORK_DIR/services"
-        PATCH_PRIVATE_SHARE "$WORK_DIR/services"
-        DISABLE_SIGNATURE_VERIFICATION "$WORK_DIR/services"
+        source scripts/utils/logging.sh
+        PATCH_SSRM "$WORK_DIR/ssrm" || exit 1
+        PATCH_KNOX_GUARD "$WORK_DIR/services" || exit 1
+        PATCH_FLAG_SECURE "$WORK_DIR/services" || exit 1
+        PATCH_SECURE_FOLDER "$WORK_DIR/services" || exit 1
+        PATCH_PRIVATE_SHARE "$WORK_DIR/services" || exit 1
+        DISABLE_SIGNATURE_VERIFICATION "$WORK_DIR/services" || exit 1
 
     - name: Recompile framework
       shell: bash
       run: |
         source scripts/features/LumiROM.sh
+        source scripts/utils/logging.sh
         RECOMPILE "$APKTOOL" "$WORK_DIR/ssrm" \
-          "FIRMWARE/system/system/framework" "$WORK_DIR" &
+          "FIRMWARE/system/system/framework" "$WORK_DIR" & p1=$!
         RECOMPILE "$APKTOOL" "$WORK_DIR/services" \
-          "FIRMWARE/system/system/framework" "$WORK_DIR" &
-        wait
+          "FIRMWARE/system/system/framework" "$WORK_DIR" & p2=$!
+        wait "$p1" || { log_error "ssrm recompile failed"; exit 1; }
+        wait "$p2" || { log_error "services recompile failed"; exit 1; }
         cp -fv "$WORK_DIR"/*.jar \
           "FIRMWARE/system/system/framework/"
 
@@ -280,6 +287,11 @@ jobs:
       run: |
         bash scripts/package/upload.sh "$DESTINATION"
 
-    - name: Cleanup
-      run: |
-        sudo rm -rf *
+    - name: Upload build logs
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: logs-${{ matrix.device }}
+        path: LOGS/
+        if-no-files-found: warn
+
