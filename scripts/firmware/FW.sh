@@ -145,7 +145,7 @@ DOWNLOAD_FIRMWARE() {
         find "$DOWN_DIR" -type f -name "*.zip.enc*" -delete
 
         # --- Show Firmware Info ---
-        local file_size=$(du -m "${DOWN_DIR}"/${MODEL}_*_fac.zip 2>/dev/null | cut -f1)
+        local file_size; file_size=$(du -m "${DOWN_DIR}"/${MODEL}_*_fac.zip 2>/dev/null | cut -f1)
         echo "Firmware Size: ${file_size} MB"
 
         mv "${DOWN_DIR}"/${MODEL}_*_fac.zip "IMGs/${MODEL}.zip"
@@ -418,7 +418,7 @@ EXTRACT_FIRMWARE_IMG() {
             local IMG_SIZE
 
             partition="$(basename "${imgfile%.img}")"
-            fstype=$(file -b $imgfile | awk '{print $1}')
+            fstype=$(file -b "$imgfile" | awk '{print $1}')
 
             case "$fstype" in
                 Linux)
@@ -426,14 +426,14 @@ EXTRACT_FIRMWARE_IMG() {
                     echo "$imgfile Detected ${BLUE}ext4${RESET}. Size: $IMG_SIZE bytes."
                     echo "${YELLOW}Extracting $imgfile in $FIRM_DIR/$partition${RESET}"
                     echo "${YELLOW}You will need sudo for extract ext4 images.${RESET}"
-                    sudo python3 $(pwd)/bin/py_scripts/imgextractor.py "$imgfile" "$FIRM_DIR" > /dev/null 2>&1
+                    sudo python3 "$(pwd)/bin/py_scripts/imgextractor.py" "$imgfile" "$FIRM_DIR" > /dev/null 2>&1
                     ;;
                 EROFS)
                     echo ""
                     IMG_SIZE=$(stat -c%s -- "$imgfile")
                     echo "$imgfile Detected ${BLUE}$fstype${RESET}. Size: $IMG_SIZE bytes."
                     echo "${YELLOW}Extracting $imgfile in $FIRM_DIR/$partition${RESET}"
-                    $(pwd)/bin/erofs-utils/extract.erofs -i "$imgfile" -x -f -o "$FIRM_DIR" >/dev/null 2>&1
+                    "$(pwd)/bin/erofs-utils/extract.erofs" -i "$imgfile" -x -f -o "$FIRM_DIR" >/dev/null 2>&1
                     ;;
                 *)
                     echo "[$imgfile] Unknown filesystem type ($fstype), skipping"

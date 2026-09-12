@@ -19,7 +19,7 @@ mkdir -p "$LOGS_DIR"
 # log_message: Print message with timestamp to console and log file
 log_message() {
     local message="$1"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp; timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] $message" | tee -a "$LOG_FILE"
 }
 
@@ -27,7 +27,7 @@ log_message() {
 # Also emits GitHub Actions annotation when running in CI (P2 observability).
 log_error() {
     local message="$1"
-    local timestamp=$(date '+%Y-%m-%d %H:%M:%S')
+    local timestamp; timestamp=$(date '+%Y-%m-%d %H:%M:%S')
     echo "[$timestamp] ERROR: $message" | tee -a "$LOG_FILE" >> "$ERROR_LOG"
     if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
         echo "::error::$message" >&2
@@ -53,7 +53,7 @@ initialize_logs() {
     local use_galaxy_ai="$7"
     local use_ui_8_tethering_apex="$8"
     local output_filesystem="$9"
-    local lumirom_maintainer="$10"
+    local lumirom_maintainer="${10}"
 
     mkdir -p "$LOGS_DIR"
     : > "$LOG_FILE"
@@ -83,11 +83,11 @@ initialize_logs() {
 finalize_logs() {
     local start_time="$1"
     
-    local end_time=$(date +%s)
-    local elapsed=$((end_time - start_time))
-    local hours=$((elapsed / 3600))
-    local mins=$(((elapsed % 3600) / 60))
-    local secs=$((elapsed % 60))
+    local end_time; end_time=$(date +%s)
+    local elapsed; elapsed=$((end_time - start_time))
+    local hours; hours=$((elapsed / 3600))
+    local mins; mins=$(((elapsed % 3600) / 60))
+    local secs; secs=$((elapsed % 60))
     
     # Format time string
     if [ $hours -gt 0 ]; then

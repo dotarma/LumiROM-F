@@ -165,18 +165,18 @@ PATCH_FSTAB_EROFS() {
     local partitions="system system_ext vendor product odm"
 
     for target in "${fstab_files[@]}"; do
-        local fstab_name=$(basename "$target")
+        local fstab_name; fstab_name=$(basename "$target")
         echo "${CYAN}Processing:${RESET} /vendor/etc/$fstab_name"
         
         for part in $partitions; do
-            if sudo grep -E -q "^$part[[:space:]]+.*erofs" "$target"; then
+            if sudo grep -E -q "^${part}[[:space:]]+.*erofs" "$target"; then
                 echo "${YELLOW}Skipped:${RESET} Partition $part already contains 'erofs'."
                 continue
             fi
 
-            if sudo grep -E -q "^$part[[:space:]]+.*ext4" "$target"; then
+            if sudo grep -E -q "^${part}[[:space:]]+.*ext4" "$target"; then
                 echo "${GREEN}Patching:${RESET} $part (ext4 -> erofs)"
-                sudo sed -i -E "/^$part[[:space:]]+.*ext4/ { p; s/ext4/erofs/2; t; s/ext4/erofs/ }" "$target"
+                sudo sed -i -E "/^${part}[[:space:]]+.*ext4/ { p; s/ext4/erofs/2; t; s/ext4/erofs/ }" "$target"
             fi
         done
     done
@@ -214,7 +214,7 @@ DECOMPILE() {
     local APKTOOL="$1"
     local FILE="$2"
     local DECOMPILE_DIR="$3"
-    local BASENAME="$(basename "${FILE%.*}")"
+    local BASENAME; BASENAME="$(basename "${FILE%.*}")"
     local OUT="$DECOMPILE_DIR/$BASENAME"
 
     echo "${YELLOW}Decompiling:${RESET} $FILE"
@@ -239,8 +239,8 @@ RECOMPILE() {
     org_file_name=$(awk '/^apkFileName:/ {print $2}' "$DECOMPILED_DIR/apktool.yml")
     local name="${org_file_name%.*}"
     local ext="${org_file_name##*.}"
-    local built_file="$WORK_DIR/${name}_unsigned.$ext"
-    local final_file="$WORK_DIR/$org_file_name"
+    local built_file="${RECOMPILE_DIR}/${name}_unsigned.$ext"
+    local final_file="${RECOMPILE_DIR}/$org_file_name"
 
     echo "${YELLOW}Recompiling:${RESET} $DECOMPILED_DIR"
     java -jar "$APKTOOL" b "$DECOMPILED_DIR" --copy-original -p "$FRAMEWORK_DIR" -o "$built_file"
@@ -262,8 +262,8 @@ HEX_PATCH() {
     fi
 
     local FILE="$1"
-    local FROM="$(echo "$2" | tr '[:upper:]' '[:lower:]')"
-    local TO="$(echo "$3" | tr '[:upper:]' '[:lower:]')"
+    local FROM; FROM="$(echo "$2" | tr '[:upper:]' '[:lower:]')"
+    local TO; TO="$(echo "$3" | tr '[:upper:]' '[:lower:]')"
 
     [ ! -f "$FILE" ] && { echo "File not found: $FILE"; return 1; }
 
@@ -698,14 +698,18 @@ APPLY_STOCK_CONFIG() {
 
     if [ -f "$DEVICES_DIR/$STOCK_DEVICE/config" ]; then
         echo "${GREEN}-${RESET} $STOCK_DEVICE ${GREEN}config found.${RESET}"
-        export STOCK_VNDK_VERSION="$(grep -m1 '^STOCK_VNDK_VERSION=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-        export STOCK_HAS_SEPARATE_SYSTEM_EXT="$(grep -m1 '^STOCK_HAS_SEPARATE_SYSTEM_EXT=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
-		export STOCK_DVFS_FILENAME="$(grep -m1 '^STOCK_DVFS_FILENAME=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        STOCK_VNDK_VERSION="$(grep -m1 '^STOCK_VNDK_VERSION=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_VNDK_VERSION
+        STOCK_HAS_SEPARATE_SYSTEM_EXT="$(grep -m1 '^STOCK_HAS_SEPARATE_SYSTEM_EXT=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_HAS_SEPARATE_SYSTEM_EXT
+		STOCK_DVFS_FILENAME="$(grep -m1 '^STOCK_DVFS_FILENAME=' "$DEVICES_DIR/$STOCK_DEVICE/config" | cut -d= -f2 | tr -d '\r')"
+        export STOCK_DVFS_FILENAME
     fi
 
     export STOCK_FLOATING_FEATURE="$DEVICES_DIR/$STOCK_DEVICE/floating_feature.xml"
 	export TARGET_FLOATING_FEATURE="$EXTRACTED_FIRM_DIR/system/system/etc/floating_feature.xml"
-	export STOCK_SIOP_FILENAME="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_SYSTEM_CONFIG_SIOP_POLICY_FILENAME" {print $3}' "$STOCK_FLOATING_FEATURE" | tr -d '\r' | xargs)"
+	STOCK_SIOP_FILENAME="$(awk -F'[<>]' '$2 == "SEC_FLOATING_FEATURE_SYSTEM_CONFIG_SIOP_POLICY_FILENAME" {print $3}' "$STOCK_FLOATING_FEATURE" | tr -d '\r' | xargs)"
+    export STOCK_SIOP_FILENAME
 
 	# FIX SYSTEM_EXT.
     FIX_SYSTEM_EXT "$EXTRACTED_FIRM_DIR"
@@ -1026,8 +1030,10 @@ GEN_FS_CONFIG() {
         if [[ "$PARTITION" == "vendor" ]]; then
             echo "${YELLOW}  [*] Fixing vendor_fs_config...${RESET}"
             
-            local TMP_CLEAN=$(mktemp)
+            local TMP_CLEAN; TMP_CLEAN=$(mktemp)
             
+            # shellcheck disable=SC2024
+            # sudo is for reading root-owned FS_CONFIG; redirect to /tmp stays as user (intended).
             sudo awk '{
                 gsub(/^\//, "", $1);
                 if (length($4) == 4 && substr($4, 1, 1) == "0") $4 = substr($4, 2);
@@ -1055,7 +1061,7 @@ GEN_FS_CONFIG() {
         # P1 perf: O(n log n) batch instead of grep-per-file O(n*m).
         # Build sorted existing-entry set once, diff with find output via comm,
         # then append missing entries in one batch (2 sudo calls total).
-        local TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
+        local TMP_ALL; TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
         sudo find "$ROOT" -mindepth 1 -printf "$PARTITION/%P\n" | LC_ALL=C sort -u > "$TMP_ALL"
         awk '{print $1}' "$FS_CONFIG" | LC_ALL=C sort -u > "$TMP_EXIST"
         LC_ALL=C comm -23 "$TMP_ALL" "$TMP_EXIST" > "$TMP_MISS"
@@ -1093,7 +1099,7 @@ GEN_FILE_CONTEXTS() {
         echo "${YELLOW}--- Syncing contexts for: $PARTITION ---${RESET}"
 
         # P1 perf: single find + comm instead of grep-per-file.
-        local TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
+        local TMP_ALL; TMP_ALL=$(mktemp) TMP_EXIST=$(mktemp) TMP_MISS=$(mktemp)
         sudo find "$ROOT" -mindepth 1 \( -type f -o -type d \) -printf "/$PARTITION/%P\n" | LC_ALL=C sort -u > "$TMP_ALL"
         sed 's/\\//g' "$FILE_CONTEXTS" | awk '{print $1}' | LC_ALL=C sort -u > "$TMP_EXIST"
         LC_ALL=C comm -23 "$TMP_ALL" "$TMP_EXIST" > "$TMP_MISS"
@@ -1122,11 +1128,11 @@ BUILD_IMG() {
     local EXTRACTED_FIRM_DIR="$1"
     local FILE_SYSTEM="$2"
 	local OUT_DIR="$3"
-    local DEVICE_CONFIG="$(pwd)/LumiROM/Devices/${STOCK_DEVICE}/config"
-    local OP_LIST="$(pwd)/makerom/dynamic_partitions_op_list"
+    local DEVICE_CONFIG; DEVICE_CONFIG="$(pwd)/LumiROM/Devices/${STOCK_DEVICE}/config"
+    local OP_LIST; OP_LIST="$(pwd)/makerom/dynamic_partitions_op_list"
 
     if [[ -f "$DEVICE_CONFIG" ]]; then
-        local SUPER_SIZE=$(grep "STOCK_SUPER_SIZE" "$DEVICE_CONFIG" | cut -d'=' -f2 | tr -d '[:space:]')
+        local SUPER_SIZE; SUPER_SIZE=$(grep "STOCK_SUPER_SIZE" "$DEVICE_CONFIG" | cut -d'=' -f2 | tr -d '[:space:]')
         
         # Update the super size on the list according to the device
         if [[ -n "$SUPER_SIZE" && -f "$OP_LIST" ]]; then
@@ -1170,6 +1176,8 @@ BUILD_IMG() {
                 echo "${YELLOW}Building EROFS image: $OUT_IMG${RESET}"
                 # P1: keep mkfs log in LOG_FILE instead of /dev/null; fail fast per-partition
                 local MKFS_LOG="${LOG_FILE:-/tmp/mkfs_${PARTITION}.log}"
+                # shellcheck disable=SC2024
+                # sudo runs mkfs as root; log redirect stays as user (intended).
                 if sudo "$(pwd)/bin/erofs-utils/mkfs.erofs" --mount-point="$MOUNT_POINT" --fs-config-file="$FS_CONFIG" --file-contexts="$FILE_CONTEXTS" -z lz4hc -b 4096 -T 1640995200 "$OUT_IMG" "$SRC_DIR" >>"$MKFS_LOG" 2>&1; then
                     sudo chown -R "$(whoami)":"$(whoami)" "$OUT_IMG"
                 else
@@ -1190,7 +1198,7 @@ BUILD_IMG() {
         PARTITION="$(basename "$PART")"
         local OUT_IMG="$OUT_DIR/${PARTITION}.img"
         if [[ -f "$OUT_IMG" && -f "$OP_LIST" ]]; then
-            local ACTUAL_SIZE=$(stat -c%s "$OUT_IMG")
+            local ACTUAL_SIZE; ACTUAL_SIZE=$(stat -c%s "$OUT_IMG")
             echo "${GREEN}Updating size of $PARTITION in op_list: $ACTUAL_SIZE bytes${RESET}"
             sed -i "s/^resize $PARTITION .*/resize $PARTITION $ACTUAL_SIZE/" "$OP_LIST"
         fi
@@ -1205,7 +1213,7 @@ IMG_TO_BROTLI() {
 
     local IMG_DIR="$1"
     local TMP_DIR="$2"
-    local IMG2SDAT_BIN="$(pwd)/bin/img2sdat/img2sdat"
+    local IMG2SDAT_BIN; IMG2SDAT_BIN="$(pwd)/bin/img2sdat/img2sdat"
 
     mkdir -p "$TMP_DIR"
 
@@ -1251,7 +1259,7 @@ IMG_TO_BROTLI() {
         ) &
 
         # Limit concurrent jobs
-        while [ $(jobs -r | wc -l) -ge "$JOBS" ]; do
+        while [ "$(jobs -r | wc -l)" -ge "$JOBS" ]; do
             sleep 1
         done
     done

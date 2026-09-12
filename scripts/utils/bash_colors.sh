@@ -1,6 +1,10 @@
 #!/bin/bash
+# shellcheck disable=SC2034
+# Colors are consumed by sourcing scripts (not in this file) — export so
+# ShellCheck and `set -u` callers treat them as used.
 
 # Recopiled by Lumi
+export ESC
 ESC=$(printf '\033')
 
 # Reset

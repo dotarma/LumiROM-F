@@ -5,7 +5,7 @@ source scripts/utils/bash_colors.sh
 REPLACE_SMALI_METHOD() {
     local FILE="$1"
     local METHOD_NAME="$2"
-    local NEW_BODY=$(echo "$3" | tail -n +2)
+    local NEW_BODY; NEW_BODY=$(echo "$3" | tail -n +2)
 
     echo "- Patching: $FILE"
     echo "  Method: $METHOD_NAME"

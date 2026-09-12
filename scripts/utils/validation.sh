@@ -3,15 +3,20 @@
 source scripts/utils/bash_colors.sh
 
 VALIDATION() {
-    SUPPORTED_DEVICES=(LumiROM/Devices/*)
-
     # STOCK_DEVICE
     if [ -z "$STOCK_DEVICE" ]; then
         echo "${RED}Error:${RESET} STOCK_DEVICE is not set."
         exit 1
     fi
 
-    if [[ ! " ${SUPPORTED_DEVICES[@]} " =~ " LumiROM/Devices/$STOCK_DEVICE " ]]; then
+    local _supported=0 _d
+    for _d in LumiROM/Devices/*/; do
+        if [[ "$(basename "$_d")" == "$STOCK_DEVICE" ]]; then
+            _supported=1
+            break
+        fi
+    done
+    if (( ! _supported )); then
         echo "${RED}Error:${RESET} STOCK_DEVICE must be supported by the script. Check ${BLUE}LumiROM/Devices${RESET} for supported devices."
         exit 1
     fi

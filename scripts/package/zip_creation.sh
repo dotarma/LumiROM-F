@@ -12,7 +12,7 @@ UPDATE_ZIP_SCRIPT() {
         BUILD_DATE=$(date +'%d%m%Y')
         DEVICE="$STOCK_DEVICE"
         UPDATER_PATH="$(pwd)/makerom/META-INF/com/google/android/updater-script"
-        local oneui_prop_ver=$(grep -m 1 "ro.build.version.oneui=" "$BUILD_PROP_PATH" | cut -d'=' -f2)
+        local oneui_prop_ver; oneui_prop_ver=$(grep -m 1 "ro.build.version.oneui=" "$BUILD_PROP_PATH" | cut -d'=' -f2)
         local cut_version="${oneui_prop_ver:0:3}"
         ONEUI_VERSION="${cut_version/0/.}"
 
@@ -88,7 +88,7 @@ FLASHABLE_ZIP_CREATION() {
         ZIP_FILE="LumiROM_${LUMIROM_VERSION}-${BUILD_DATE}_${BUILD_STATUS}_${DEVICE_CODENAME}.zip"
         [ -f "$ZIP_FILE" ] && rm "$ZIP_FILE"
 
-        cd "$MAKEROM_DIR"
+        cd "$MAKEROM_DIR" || exit 1
 
         # ZIP the rom with mixed compression levels (Multithreaded 7z)
         echo "${YELLOW}Adding large/compressed files (Store)...${RESET}"
