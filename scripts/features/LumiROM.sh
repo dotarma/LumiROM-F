@@ -376,16 +376,49 @@ PATCH_BT_LIB() {
 
 
 FIX_VNDK() {
+    # $1 (optional): EXTRACTED_FIRM_DIR — lets us locate vintf manifest on
+    # new firmware layouts where it moved out of system_ext.
+    local EXTRACTED_FIRM_DIR="${1:-}"
+    if [[ -z "${TARGET_ROM_SYSTEM_EXT_DIR:-}" ]]; then
+        echo "${RED}Error: TARGET_ROM_SYSTEM_EXT_DIR is not set (call FIX_SYSTEM_EXT first).${RESET}"
+        return 1
+    fi
     echo "${YELLOW}- Checking ${RESET}$STOCK_DEVICE ${YELLOW}and${RESET} $TARGET_DEVICE ${YELLOW}vndk version.${RESET}"
     if [ -f "$TARGET_ROM_SYSTEM_EXT_DIR/apex/com.android.vndk.v${STOCK_VNDK_VERSION}.apex" ]; then
         echo "${GREEN}- VNDK matched.${RESET}"
     else
         echo "${RED}- VNDK mismatch or missing.${RESET}"
         echo "${YELLOW}- Extracting VNDK from $STOCK_DEVICE${RESET}"
-        rm -f "$TARGET_ROM_SYSTEM_EXT_DIR/apex/com.android.vndk"*.apex
+        local APEX_SRC="$VNDKS_COLLECTION/vndk31-a16/com.android.vndk.v${STOCK_VNDK_VERSION}.apex"
+        if [[ ! -f "$APEX_SRC" ]]; then
+            echo "${RED}Error: VNDK apex not found at${RESET} $APEX_SRC"
+            return 1
+        fi
+        rm -f "$TARGET_ROM_SYSTEM_EXT_DIR"/apex/com.android.vndk*.apex
         mkdir -p "$TARGET_ROM_SYSTEM_EXT_DIR/apex/"
-        cp -rfa "$VNDKS_COLLECTION/vndk31-a16/com.android.vndk.v${STOCK_VNDK_VERSION}.apex" "$TARGET_ROM_SYSTEM_EXT_DIR/apex/"
-        sed -i "/<vendor-ndk>/,/<\/vendor-ndk>/ s|<version>[0-9]\+</version>|<version>${STOCK_VNDK_VERSION}</version>|" "$TARGET_ROM_SYSTEM_EXT_DIR/etc/vintf/manifest.xml"
+        cp -rfa "$APEX_SRC" "$TARGET_ROM_SYSTEM_EXT_DIR/apex/" || return 1
+        # Newer firmware (e.g. SM-S948U base) moved vintf manifest out of
+        # system_ext — locate it dynamically instead of hardcoding one path.
+        local manifest=""
+        local cand
+        for cand in \
+            "$TARGET_ROM_SYSTEM_EXT_DIR/etc/vintf/manifest.xml" \
+            "${EXTRACTED_FIRM_DIR:+$EXTRACTED_FIRM_DIR/system/system/system_ext/etc/vintf/manifest.xml}" \
+            "${EXTRACTED_FIRM_DIR:+$EXTRACTED_FIRM_DIR/system/system/etc/vintf/manifest.xml}"; do
+            [[ -n "$cand" && -f "$cand" ]] && { manifest="$cand"; break; }
+        done
+        if [[ -z "$manifest" && -n "$EXTRACTED_FIRM_DIR" ]]; then
+            manifest="$(find "$EXTRACTED_FIRM_DIR/system" "$EXTRACTED_FIRM_DIR/vendor" -path "*vintf/manifest.xml" 2>/dev/null | head -n 1)"
+        fi
+        if [[ -z "${manifest:-}" || ! -f "$manifest" ]]; then
+            echo "${YELLOW}Warning: vintf manifest.xml not found; skipping VNDK version bump (apex already replaced).${RESET}"
+            return 0
+        fi
+        sed -i "/<vendor-ndk>/,/<\/vendor-ndk>/ s|<version>[0-9]\+</version>|<version>${STOCK_VNDK_VERSION}</version>|" "$manifest" || {
+            echo "${YELLOW}Warning: failed to patch $manifest; continuing.${RESET}"
+            return 0
+        }
+        echo "${GREEN}- VNDK manifest patched:${RESET} $manifest"
     fi
 }
 
@@ -715,7 +748,7 @@ APPLY_STOCK_CONFIG() {
     FIX_SYSTEM_EXT "$EXTRACTED_FIRM_DIR"
 
 	# FIX VNDK.
-	FIX_VNDK
+	FIX_VNDK "$EXTRACTED_FIRM_DIR"
 
 	# FIX SELINUX.
 	FIX_SELINUX
